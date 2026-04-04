@@ -50,6 +50,10 @@ HEALTHCHECK_INTERVAL: 1e4,
 DISCONNECTED_GRACE_PERIOD: 1e4,
 STATS_UPDATE_INTERVAL: 4e3,
 
+AUTO_SWITCH_BACK_TO_CONTROL: true,
+SWITCH_BACK_DELAY: 800,
+CONTROL_ROOM_URL_OVERRIDE: "",
+
 DRAGGABLE_BUTTON_ID: "douyu-qmx-starter-button",
 BUTTON_POS_STORAGE_KEY: "douyu_qmx_button_position",
 MODAL_DISPLAY_MODE: "floating",
@@ -2000,7 +2004,7 @@ async openOneNewTab() {
           if (window.location.href.includes("/beta") || localStorage.getItem("newWebLive") !== "A") {
             localStorage.setItem("newWebLive", "A");
           }
-          GM_openInTab(newUrl, { active: false, setParent: true });
+          GM_openInTab(newUrl, { active: true, setParent: true });
           Utils.log(`打开指令已发送: ${newUrl}`);
         } else {
           Utils.log("未能找到新的、未打开的房间。");
@@ -2364,6 +2368,7 @@ async checkForLimitPopup() {
     }
   };
   const WorkerPage = {
+hasSwitchedBackOnce: false,
 healthCheckTimeoutId: null,
     currentTaskEndTime: null,
     lastHealthCheckTime: null,
@@ -2496,6 +2501,10 @@ async init() {
         statusText = headlineElem ? headlineElem.textContent.trim() : "";
         countdownText = contentElem ? contentElem.textContent.trim() : "";
         redEnvelopeDiv = waitedDiv;
+      }
+      if (!this.hasSwitchedBackOnce) {
+        this.hasSwitchedBackOnce = true;
+        setTimeout(() => this.switchBackToControlRoom("redEnvelopeReady"), SETTINGS.SWITCH_BACK_DELAY);
       }
       if (countdownText.includes(":")) {
         const timeMatch = countdownText.match(/(\d+):(\d+)/);
@@ -2841,7 +2850,7 @@ async switchRoom() {
           if (window.location.href.includes("/beta") || localStorage.getItem("newWebLive") !== "A") {
             localStorage.setItem("newWebLive", "A");
           }
-          GM_openInTab(nextUrl, { active: false, setParent: true });
+          GM_openInTab(nextUrl, { active: true, setParent: true });
           await Utils.sleep(SETTINGS.CLOSE_TAB_DELAY);
           await this.selfClose(currentRoomId);
         } else {
@@ -2911,6 +2920,28 @@ startCommandListener(roomId) {
           this.commandChannel.close();
         }
       });
+    },
+getControlRoomUrl() {
+      if (SETTINGS.CONTROL_ROOM_URL_OVERRIDE) {
+        return SETTINGS.CONTROL_ROOM_URL_OVERRIDE;
+      }
+      return `https://www.douyu.com/${SETTINGS.CONTROL_ROOM_ID}`;
+    },
+switchBackToControlRoom(reason) {
+      if (!SETTINGS.AUTO_SWITCH_BACK_TO_CONTROL) return;
+      Utils.log(`[切回] 尝试切回控制室 (原因: ${reason})`);
+      try {
+        if (window.opener && !window.opener.closed) {
+          window.opener.focus();
+          Utils.log(`[切回] 通过 window.opener.focus() 切回控制室成功`);
+          return;
+        }
+      } catch (e) {
+        Utils.log(`[切回] window.opener.focus() 失败: ${e.message}`);
+      }
+      const controlRoomUrl = this.getControlRoomUrl();
+      Utils.log(`[切回] 使用 GM_openInTab 切回控制室: ${controlRoomUrl}`);
+      GM_openInTab(controlRoomUrl, { active: true, setParent: false });
     },
 async waitForRedEnvelopeContainer(timeout) {
       const startTime = Date.now();
