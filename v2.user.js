@@ -2998,6 +2998,27 @@ async waitForRedEnvelopeContainer(timeout) {
   }
 
   (function() {
+    // 在 document-start 阶段立即对工作页应用可见性欺骗，早于页面框架/红包模块初始化判断。
+    // 利用幂等性保证：main() 里的二次调用会直接跳过，不重复打补丁。
+    (function earlyVisibilitySpoof() {
+      try {
+        const url = window.location.href;
+        // URL 判断与 main() 中保持一致（刻意复制以避免跨函数依赖，保证最早执行路径独立安全）
+        const ctrlIds = [SETTINGS.CONTROL_ROOM_ID, SETTINGS.TEMP_CONTROL_ROOM_RID].filter(Boolean);
+        if (ctrlIds.some(id => url.includes(`/${id}`) || (url.includes("/topic/") && url.includes(`rid=${id}`)))) return;
+        if (!url.match(/douyu\.com\/(?:beta\/)?(\d+)/) && !url.match(/douyu\.com\/(?:beta\/)?topic\/.*rid=(\d+)/)) return;
+        const roomId = Utils.getCurrentRoomId();
+        if (!roomId) return;
+        const globalTabs = GlobalState.get().tabs;
+        const pendingWorkers = GM_getValue("qmx_pending_workers", []);
+        if (Object.hasOwn(globalTabs, roomId) || pendingWorkers.includes(roomId)) {
+          applyVisibilityGatingSpoof();
+        }
+      } catch (e) {
+        try { Utils.log("[可见性欺骗][早期] 初始化异常: " + e); } catch (_) {}
+      }
+    })();
+
     function main() {
       initHackTimer("HackTimerWorker.js");
       const currentUrl = window.location.href;
@@ -3016,7 +3037,7 @@ async waitForRedEnvelopeContainer(timeout) {
         const pendingWorkers = GM_getValue("qmx_pending_workers", []);
         if (Object.hasOwn(globalTabs, roomId) || pendingWorkers.includes(roomId)) {
           Utils.log(`[身份验证] 房间 ${roomId} 身份合法，授权初始化。`);
-          applyVisibilityGatingSpoof();
+          applyVisibilityGatingSpoof(); // 幂等：若已在 earlyVisibilitySpoof 中应用则直接返回
           const pendingIndex = pendingWorkers.indexOf(roomId);
           if (Object.hasOwn(globalTabs, roomId) && pendingIndex > -1) {
             pendingWorkers.splice(pendingIndex, 1);
