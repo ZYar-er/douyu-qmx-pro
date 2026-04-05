@@ -18,7 +18,7 @@
 // @grant            GM_setValue
 // @grant            GM_xmlhttpRequest
 // @grant            window.close
-// @run-at           document-idle
+// @run-at           document-start
 // @noframes
 // @original-author  ysl-ovo (https://greasyfork.org/zh-CN/users/1453821-ysl-ovo)
 // ==/UserScript==
@@ -2960,6 +2960,43 @@ async waitForRedEnvelopeContainer(timeout) {
       return null;
     }
   };
+  function applyVisibilityGatingSpoof() {
+    if (window.__qmxVisibilitySpoofApplied) return;
+    window.__qmxVisibilitySpoofApplied = true;
+    try {
+      const overrideGetter = (obj, prop, value) => {
+        try {
+          Object.defineProperty(obj, prop, { configurable: true, get: () => value });
+        } catch (_) {}
+      };
+      overrideGetter(document, "hidden", false);
+      overrideGetter(document, "visibilityState", "visible");
+      overrideGetter(document, "webkitHidden", false);
+      overrideGetter(document, "webkitVisibilityState", "visible");
+      if (typeof document.hasFocus === "function") {
+        const _orig = document.hasFocus.bind(document);
+        document.hasFocus = () => { _orig(); return true; };
+      }
+      const _origDocAdd = document.addEventListener.bind(document);
+      document.addEventListener = function(type, listener, options) {
+        if (type === "visibilitychange" || type === "webkitvisibilitychange") return;
+        return _origDocAdd(type, listener, options);
+      };
+      const _origWinAdd = window.addEventListener.bind(window);
+      window.addEventListener = function(type, listener, options) {
+        if (type === "blur") return;
+        return _origWinAdd(type, listener, options);
+      };
+      window.onblur = null;
+      document.onvisibilitychange = null;
+      queueMicrotask(() => {
+        try { window.dispatchEvent(new Event("focus")); } catch (_) {}
+        try { document.dispatchEvent(new Event("visibilitychange")); } catch (_) {}
+      });
+      Utils.log("[可见性欺骗] Page Visibility / Focus spoof 已应用。");
+    } catch (_) {}
+  }
+
   (function() {
     function main() {
       initHackTimer("HackTimerWorker.js");
@@ -2979,6 +3016,7 @@ async waitForRedEnvelopeContainer(timeout) {
         const pendingWorkers = GM_getValue("qmx_pending_workers", []);
         if (Object.hasOwn(globalTabs, roomId) || pendingWorkers.includes(roomId)) {
           Utils.log(`[身份验证] 房间 ${roomId} 身份合法，授权初始化。`);
+          applyVisibilityGatingSpoof();
           const pendingIndex = pendingWorkers.indexOf(roomId);
           if (Object.hasOwn(globalTabs, roomId) && pendingIndex > -1) {
             pendingWorkers.splice(pendingIndex, 1);
